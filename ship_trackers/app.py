@@ -1,7 +1,9 @@
+from os import environ
+import sys
 import json
 import requests
 import dateutil.parser
-from os import environ
+import argparse
 
 class Processor(object):
     """
@@ -46,7 +48,7 @@ class TrackingStatus(object):
             dt = '{:<5}'.format(dt.strftime('%m/%d'))
             location = '{}-{}'.format(event.get('state_province', ''), event.get('city_locality', ''))
 
-            return '{} {:20}'.format(dt, location)
+            return dt, location
 
 
         res = []
@@ -55,18 +57,19 @@ class TrackingStatus(object):
             headline_fm = '{id} {item}\nStatus: {status}\nDetails: {descriptions}'
             event_fm = '\t{datetime} {location}: {descriptions}'
         else:
-            headline_fm = '{latest_update:30} | {status:10} | {item:50}'
+            headline_fm = '{latest_date:5} | {latest_location:30} | {status:10} | {item:50}'
             event_fm = '\t{datetime:<5} {location}'
 
         events = status.get('events', [])
-        latest_update = make_update_string(events[0]) if events else 'unknown'
+        latest_date, latest_location = make_update_string(events[0]) if events else 'unknown'
 
         headline = {
-            'item'          : status.get('item', 'Invalid Item Name'),
-            'id'            : 'ID ' + status.get('tracking_number', 'invalid_tracking_number'),
-            'status'        : status.get('status_description', ''),
-            'descriptions'  : status.get(', carrier_status_description', 'no_description'),
-            'latest_update' : latest_update
+            'item'            : status.get('item', 'Invalid Item Name'),
+            'id'              : 'ID ' + status.get('tracking_number', 'invalid_tracking_number'),
+            'status'          : status.get('status_description', ''),
+            'descriptions'    : status.get('carrier_status_description', 'no_description'),
+            'latest_date'     : latest_date,
+            'latest_location' : latest_location,
         }
 
         res.append(headline_fm.format(**headline))
@@ -87,11 +90,12 @@ def order_by_latest_update(status):
     lowest = 0
 
     order = {
-        'Delivered': 10,
-        'Accepted': 9,
-        'Unknown': 8,
-        'In Transit': 9,
-        '': lowest,
+        'Exception'  : 10,
+        'Delivered'  : 9,
+        'Accepted'   : 8,
+        'In Transit' : 7,
+        'Unknown'    : 6,
+        ''           : lowest,
     }
     main_stat = status.get('status_description', '')
     update = status.get('events', [])
@@ -110,6 +114,7 @@ def track_all(shipments, verbose):
         r.update({'item': shipment.get('item', '')})
 
     res = sorted(res, key=order_by_latest_update, reverse=True)
+    # print json.dumps(res, indent=2)
 
     status_printer = TrackingStatus(verbose=verbose)
     res = map(status_printer.to_string, res)
@@ -118,15 +123,24 @@ def track_all(shipments, verbose):
     else:
         border = '-' * len(res[0])
         res.insert(0, border)
-        res.insert(1, '{:30} | {:10} | {:50}'.format('LOCATION', 'STATUS', 'ITEM'))
+        res.insert(1, '{:5} | {:30} | {:10} | {:50}'.format('DATE', 'LOCATION', 'STATUS', 'ITEM'))
         res.insert(2, border)
         return '\n'.join(res)
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Tracking shipments stored in (default) my_shipments.json')
+    parser.add_argument('--shipments', dest='shipments', action='store',
+                        type=str, default='my_shipments.json',
+                        help='shipments file that store [tracking_number, carrier, item]')
+    parser.add_argument('--verbose', dest='verbose', action='store_true',
+                        help='the verbosity level of display output')
+
+    args = parser.parse_args()
+
     print '--- TRACKING APP V1.0 ---'
     try:
-        shipments = json.loads(open('shipments.json', 'r').read())
+        shipments = json.loads(open(args.shipments, 'r').read())
     except:
         print 'Cannot load shipments for tracking'
         raise Exception()
-    print track_all(shipments, verbose=False)
+    print track_all(shipments, verbose=args.verbose)
